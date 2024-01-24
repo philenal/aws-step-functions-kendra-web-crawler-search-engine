@@ -44,8 +44,6 @@ export interface CrawlPageInput extends CrawlConfig {
  * Destination parameters for storing crawled content
  */
 export interface CrawlDestination {
-  s3: AWS.S3,
-  s3BucketName: string;
   s3KeyPrefix: string;
 }
 
@@ -53,6 +51,15 @@ export interface CrawlDestination {
  * Represents the content of a web page
  */
 export interface PageContent {
-  title: string;
-  htmlContent: string;
+  metadata: Metadata;
+  html: string;
+}
+
+/**
+ * Represents the metadata of a web page
+ */
+export interface Metadata {
+  'title': string;
+  'last-modified': string;
+  'url': string;
 }

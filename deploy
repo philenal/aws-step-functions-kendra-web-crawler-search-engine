@@ -6,14 +6,13 @@ set -e;
 
 # Parse arguments
 CDK_PROFILE=default
-KENDRA="false"
 while [[ "$#" -gt 0 ]]; do case $1 in
-  --profile) CDK_PROFILE="$2"; shift;;
-  --with-kendra) KENDRA="true";;
+  --profile) CDK_PROFILE="$2"; shift;;  # Shift after assigning $2 to CDK_PROFILE
+        *) ;;  # Add a default case to handle unexpected arguments
 esac; shift; done
 
 # Build
 npm ci && npm run build
 
 # Deploy
-npx cdk --profile $CDK_PROFILE deploy '*' -c kendra=$KENDRA --require-approval never
+npx cdk --profile $CDK_PROFILE deploy '*' --require-approval never

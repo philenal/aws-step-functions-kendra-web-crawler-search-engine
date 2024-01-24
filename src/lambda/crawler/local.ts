@@ -14,7 +14,6 @@ import { CrawlDestination, CrawlInput } from './types';
 export const crawl = async (
   browser: Browser,
   input: CrawlInput,
-  destination?: CrawlDestination,
 ) => {
   const pathQueue = [...input.startPaths];
   const seenPaths = new Set(pathQueue);
@@ -23,6 +22,8 @@ export const crawl = async (
     const path = pathQueue.pop()!;
     seenPaths.add(path);
     console.log('Visiting', path);
+
+    const destination: CrawlDestination = { s3KeyPrefix: input.crawlName };
 
     const newPaths = await extractPageContentAndUrls(browser, {
       ...input,

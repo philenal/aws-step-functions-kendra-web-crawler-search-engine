@@ -7,7 +7,6 @@ import { Function } from 'aws-cdk-lib/aws-lambda'
 import { Table } from 'aws-cdk-lib/aws-dynamodb';
 import { Bucket} from 'aws-cdk-lib/aws-s3';
 import WebCrawlerLambda from './web-crawler-lambda';
-import { KendraInfrastructureProps } from '../../stacks/web-crawler-stack';
 import ChromeLambdaLayer from './chrome-lambda-layer';
 import { DEFAULT_STATE_MACHINE_URL_THRESHOLD, DEFAULT_PARALLEL_URLS_TO_SYNC } from './constants';
 
@@ -15,9 +14,9 @@ export interface WebCrawlerStepLambdasProps {
   region: string;
   contextTableNamePrefix: string;
   createContextTablePolicy: (actions: string[]) => PolicyStatement;
-  kendra?: KendraInfrastructureProps;
   historyTable: Table;
   workingBucket: Bucket;
+  s3DataBucket: Bucket;
   webCrawlerStateMachineArn: string;
 }
 
@@ -45,13 +44,9 @@ export default class WebCrawlerStepLambdas extends Construct {
       CONTEXT_TABLE_NAME_PREFIX: props.contextTableNamePrefix,
       HISTORY_TABLE_NAME: props.historyTable.tableName,
       WORKING_BUCKET: props.workingBucket.bucketName,
+      S3_DATA_BUCKET: props.s3DataBucket.bucketName,
       STATE_MACHINE_URL_THRESHOLD: String(DEFAULT_STATE_MACHINE_URL_THRESHOLD),
       PARALLEL_URLS_TO_SYNC: String(DEFAULT_PARALLEL_URLS_TO_SYNC),
-      ...(props.kendra ? {
-        DATA_SOURCE_BUCKET_NAME: props.kendra.dataSourceBucket.bucketName,
-        KENDRA_INDEX_ID: props.kendra.kendraIndex.attrId,
-        KENDRA_DATA_SOURCE_ID: props.kendra.kendraDataSource.attrId,
-      } : {}),
     };
 
     // Layer including chrome for the web crawler lambdas
@@ -69,7 +64,7 @@ export default class WebCrawlerStepLambdas extends Construct {
 
     // Lambda for crawling a page
     const crawlPageAndQueueUrls = buildLambda('CrawlPageAndQueueUrlsLambda', 'crawlPageAndQueueUrlsHandler');
-    props.kendra && props.kendra.dataSourceBucket.grantWrite(crawlPageAndQueueUrls);
+    props.s3DataBucket.grantReadWrite(crawlPageAndQueueUrls);
     crawlPageAndQueueUrls.addToRolePolicy(props.createContextTablePolicy(['PutItem', 'GetItem', 'DeleteItem']));
 
     // Lambda for reading queued urls from the context table
@@ -78,16 +73,11 @@ export default class WebCrawlerStepLambdas extends Construct {
     props.workingBucket.grantReadWrite(readQueuedUrls);
     readQueuedUrls.addToRolePolicy(props.createContextTablePolicy(['Query']));
     
-    // Lambda for cleaning up (and optionally syncing kendra) when crawling has finished
+    // Lambda for cleaning up when crawling has finished
     const completeCrawl = buildLambda('CompleteCrawlLambda', 'completeCrawlHandler');
     props.historyTable.grantReadWriteData(completeCrawl);
     props.workingBucket.grantReadWrite(completeCrawl);
     completeCrawl.addToRolePolicy(props.createContextTablePolicy(['DeleteTable']));
-    props.kendra && completeCrawl.addToRolePolicy(new PolicyStatement({
-      effect: Effect.ALLOW,
-      actions: ['kendra:StartDataSourceSyncJob'],
-      resources: [props.kendra.kendraIndex.attrArn, `${props.kendra.kendraIndex.attrArn}/data-source/*`],
-    }));
 
     // When we've reached a certain queue size, we restart the step function execution so as not to breach the
     // execution history limit of 25000 steps

@@ -1,13 +1,10 @@
 // Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 // SPDX-License-Identifier: MIT-0
-import * as AWS from 'aws-sdk';
 import chrome from 'chrome-aws-lambda';
 import { extractPageContentAndUrls } from '../crawler/core';
 import { CrawlContext } from '../crawler/types';
 import { markPathAsVisited, queuePaths } from '../utils/contextTable';
 import { Browser } from "puppeteer-core";
-
-const s3 = new AWS.S3();
 
 /**
  * This step is the main part of the webcrawler, responsible for extracting content from a single webpage, and adding
@@ -16,7 +13,6 @@ const s3 = new AWS.S3();
 export const crawlPageAndQueueUrls = async (
   path: string,
   crawlContext: CrawlContext,
-  dataSourceBucketName?: string,
 ) => {
   let browser: Browser | undefined;
   try {
@@ -35,20 +31,14 @@ export const crawlPageAndQueueUrls = async (
       ignoreHTTPSErrors: true,
     });
 
-    // If we've got a bucket for the kendra data source, provide this as a destination for the crawler, otherwise leave
-    // it undefined so we don't write the content to s3
-    const destination = dataSourceBucketName ? {
-      s3,
-      s3BucketName: dataSourceBucketName,
-      s3KeyPrefix: crawlName,
-    } : undefined;
-
+    const destination = { s3KeyPrefix: crawlName };
+    
     // Sync the content and extract the urls to visit
     const urlPaths = await extractPageContentAndUrls(browser, {
       baseUrl,
       path,
       pathKeywords,
-    }, destination);
+    }, destination );
     console.log('Synced content from', path);
 
     console.log('Queueing', urlPaths.length, 'new urls to visit', urlPaths);

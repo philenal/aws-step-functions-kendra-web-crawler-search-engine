@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: MIT-0
 import { Construct } from 'constructs';
 import { ArnFormat, Stack, StackProps } from 'aws-cdk-lib';
-import { CfnDataSource, CfnIndex } from 'aws-cdk-lib/aws-kendra';
 import { Bucket } from 'aws-cdk-lib/aws-s3';
 import { Effect, PolicyStatement } from 'aws-cdk-lib/aws-iam';
 import { AttributeType, Table } from 'aws-cdk-lib/aws-dynamodb';
@@ -10,26 +9,19 @@ import WebCrawlerStepLambdas from '../constructs/webcrawler/web-crawler-step-lam
 import WebCrawlerStateMachine from '../constructs/webcrawler/web-crawler-state-machine';
 import { WEB_CRAWLER_STATE_MACHINE_NAME } from '../constructs/webcrawler/constants';
 
-export interface KendraInfrastructureProps {
-  dataSourceBucket: Bucket;
-  kendraIndex: CfnIndex;
-  kendraDataSource: CfnDataSource;
-}
-
-export interface WebCrawlerStackProps extends StackProps {
-  kendra?: KendraInfrastructureProps;
-}
-
 /**
  * This stack deploys the serverless webcrawler
  */
 export class WebCrawlerStack extends Stack {
 
-  constructor(scope: Construct, id: string, props: WebCrawlerStackProps) {
+  constructor(scope: Construct, id: string, props: StackProps) {
     super(scope, id, props);
 
     // S3 bucket to store working files and output from step functions
     const workingBucket = new Bucket(this, 'WebCrawlerWorkingBucket');
+
+    // S3 bucket to store the website data we crawl
+    const s3DataBucket = new Bucket(this, 'WebsiteBucket');
 
     // Dynamodb table to store our web crawl history
     const historyTable = new Table(this, 'CrawlerHistoryTable', {
@@ -68,13 +60,13 @@ export class WebCrawlerStack extends Stack {
       region: this.region,
       contextTableNamePrefix,
       createContextTablePolicy,
-      kendra: props.kendra,
       historyTable,
       workingBucket,
+      s3DataBucket,
       webCrawlerStateMachineArn,
     });
 
     // Create the state machine
-    new WebCrawlerStateMachine(this, 'WebCrawlerStateMachine', { steps, workingBucket, webCrawlerStateMachineArn});
+    new WebCrawlerStateMachine(this, 'WebCrawlerStateMachine', { steps, workingBucket, s3DataBucket, webCrawlerStateMachineArn});
   }
 }

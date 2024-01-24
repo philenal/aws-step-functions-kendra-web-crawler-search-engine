@@ -6,14 +6,11 @@ import { startCrawl } from './steps/1_startCrawl';
 import { readQueuedUrls } from './steps/2_readQueuedUrls';
 import { crawlPageAndQueueUrls } from './steps/3_crawlPageAndQueueUrls';
 import { continueExecution } from './steps/4_continueExecution';
-import { completeCrawl, KendraDataSourceDetails } from './steps/5_completeCrawl';
+import { completeCrawl } from './steps/5_completeCrawl';
 
 const {
   HISTORY_TABLE_NAME,
   CONTEXT_TABLE_NAME_PREFIX,
-  DATA_SOURCE_BUCKET_NAME,
-  KENDRA_INDEX_ID,
-  KENDRA_DATA_SOURCE_ID,
   WEB_CRAWLER_STATE_MACHINE_ARN,
 } = process.env;
 
@@ -24,7 +21,7 @@ export const startCrawlHandler = async (event: any, context: any) => {
   console.log(event, context);
 
   if (!HISTORY_TABLE_NAME || !WEB_CRAWLER_STATE_MACHINE_ARN || !CONTEXT_TABLE_NAME_PREFIX) {
-    throw new Error("Environment not configured correctly. HISTORY_TABLE_NAME, WEB_CRAWLER_STATE_MACHINE_ARN and CONTEXT_TABLE_NAME_PREFIX must be specified");
+    throw new Error(`Environment not configured correctly. HISTORY_TABLE_NAME, WEB_CRAWLER_STATE_MACHINE_ARN, and CONTEXT_TABLE_NAME_PREFIX must be specified`);
   }
 
   const input: CrawlInput = event;
@@ -59,7 +56,7 @@ export const crawlPageAndQueueUrlsHandler = async (event: any, context: any) => 
 
   const { path, crawlContext } = event;
 
-  return await crawlPageAndQueueUrls(path, crawlContext, DATA_SOURCE_BUCKET_NAME);
+  return await crawlPageAndQueueUrls(path, crawlContext);
 };
 
 /**
@@ -80,7 +77,7 @@ export const continueExecutionHandler = async (event: any, context: any) => {
 };
 
 /**
- * When complete, clear the context database and optionally sync the kendra data source!
+ * When complete, clear the context database
  */
 export const completeCrawlHandler = async (event: any, context: any) => {
   console.log(event, context);
@@ -89,13 +86,7 @@ export const completeCrawlHandler = async (event: any, context: any) => {
     throw new Error("Environment not configured correctly. HISTORY_TABLE_NAME must be specified");
   }
 
-  // Kendra data source is deployed optionally
-  const kendraDataSourceDetails: KendraDataSourceDetails | undefined = (KENDRA_INDEX_ID && KENDRA_DATA_SOURCE_ID) ? {
-    indexId: KENDRA_INDEX_ID,
-    dataSourceId: KENDRA_DATA_SOURCE_ID,
-  } : undefined;
-
   const { crawlContext } = event.Payload;
 
-  return await completeCrawl(crawlContext, kendraDataSourceDetails);
+  return await completeCrawl(crawlContext);
 };

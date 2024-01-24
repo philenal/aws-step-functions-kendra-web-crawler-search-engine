@@ -15,6 +15,7 @@ const { booleanEquals } = Condition;
 export interface WebCrawlerStateMachineProps {
   steps: WebCrawlerSteps;
   workingBucket: Bucket;
+  s3DataBucket: Bucket;
   webCrawlerStateMachineArn: string;
 }
 
@@ -133,7 +134,8 @@ export default class WebCrawlerStateMachine extends Construct {
     webCrawlerStateMachine.grantStartExecution(props.steps.startCrawl);
     // Grant the webcrawler state machine permissions to read and write to the working bucket
     props.workingBucket.grantReadWrite(webCrawlerStateMachine.role);
-    
+    // Grant the webcrawler state machine permissions to read and write to the s3 data bucket
+    props.s3DataBucket.grantReadWrite(webCrawlerStateMachine.role);
     // manually add permission to execute own state machine, required by Distributed Map state
     // for child executions. 
     webCrawlerStateMachine.addToRolePolicy(new PolicyStatement({

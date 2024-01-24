@@ -1,28 +1,71 @@
 // Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 // SPDX-License-Identifier: MIT-0
 import { Browser, Page } from 'puppeteer-core';
+import { NodeHtmlMarkdown } from 'node-html-markdown'
+import fetch from 'node-fetch';
+import robotsParser from 'robots-parser';
+import S3 from 'aws-sdk/clients/s3';
 import { URL } from 'url';
 import * as path from 'path';
-import { CrawlDestination, CrawlPageInput, PageContent } from './types';
+import { getEnvVariableRequired } from '../utils/env';
+import { CrawlDestination, CrawlPageInput, PageContent, Metadata } from './types';
+
+const s3 = new S3();
+const S3_DATA_BUCKET = getEnvVariableRequired("S3_DATA_BUCKET");
+
+const getLastModified = async (url: string): Promise<string> => {
+  try {
+    // Send a HEAD request using the fetch API
+    const response = await fetch(url, { method: 'HEAD' });
+    if (response.ok) {
+      const lastModifiedHeader = response.headers.get('Last-Modified');
+
+      // Parse the Last-Modified date
+      return lastModifiedHeader || '';
+    } 
+  } 
+  finally {
+    return ''
+  }
+}
+
+const nhm = new NodeHtmlMarkdown({
+  keepDataImages: true,
+  ignore: ['script', 'svg', 'path']
+})
 
 /**
- * Extract content from a page. This provides a basic content extraction mechanism. You can make this more advanced and
- * add logic to further process a page here.
- * @param page puppeteer browser page
+ * Extract content from a page and processes it to 
+ * return the metadata and markdown version of the html page.
+ * @param page puppeteer browser 
+ * @returns PageContent
  */
 const extractContent = async (page: Page): Promise<PageContent> => {
-  const [ title, htmlContent ] = await Promise.all([
+  const [ title, lastModified, url, htmlContent ] = await Promise.all([
     page.evaluate(() => document.title),
+    getLastModified(page.url()),
+    page.url(),
     page.evaluate(() => document.body.innerHTML),
   ]);
-  return { title, htmlContent };
+
+  const text: string = nhm.translate(htmlContent)
+
+  const metadata: Metadata = {
+    'title': title,
+    'last-modified': lastModified,
+    'url': url
+  }
+  return { 
+    metadata, 
+    html: text
+  };
 };
 
 /**
- * Writes the given page content to S3, along with metadata for Kendra
+ * Writes the given page content to S3
  */
-const writePageToS3ForKendra = async (url: string, content: PageContent, destination: CrawlDestination) => {
-  if (!content.title || !content.htmlContent) {
+const writePageToS3 = async (url: string, content: PageContent, destination: CrawlDestination) => {
+  if (!content.html || !content.metadata) {
     console.log('Page has no content, skipping');
     return;
   }
@@ -30,24 +73,8 @@ const writePageToS3ForKendra = async (url: string, content: PageContent, destina
   // We write the document to S3 under the given key prefix
   const documentKey = path.join(destination.s3KeyPrefix, `${encodeURIComponent(url)}.html`);
 
-  // Metadata format is documented here: https://docs.aws.amazon.com/kendra/latest/dg/s3-metadata.html
-  // Note that the kendra index must be updated in CDK if adding new custom attributes here.
-  const metadata = {
-    Title: content.title,
-    Attributes: {
-      _source_uri: url,
-    },
-  };
-
-  const s3Put = (Key: string, Body: string) => destination.s3.putObject({ Bucket: destination.s3BucketName, Key, Body }).promise();
-
-  // Write the html content and metadata json to S3
-  await Promise.all([
-    s3Put(documentKey, content.htmlContent),
-    s3Put(`${documentKey}.metadata.json`, JSON.stringify(metadata)),
-  ]);
-
-  console.log("Written page content to s3");
+  await s3.putObject({ Bucket: S3_DATA_BUCKET, Key: documentKey, Body: JSON.stringify(content) }).promise();
+  console.log('Written page content to s3', documentKey);
 };
 
 
@@ -66,25 +93,44 @@ const isUrlMatchingSomeKeyword = (url: string, keywords?: string[]): boolean => 
 );
 
 /**
+ * Return whether the given url is allowed in robots.txt. If there is no robots.txt, we assume all urls are allowed.
+ */
+const isUrlAllowedInRobots = async (urlString: string): Promise<boolean> => {
+  try {
+    const url = new URL(urlString)
+    const robotsURL = url.origin + "/robots.txt"
+    const robotsResponse = await fetch(robotsURL)
+    const robotsTxt = await robotsResponse.text()
+    const robots = robotsParser(robotsURL, robotsTxt)
+    return robots.isAllowed(urlString) || false;
+  } catch (error) {
+    // There is no robots.txt, so we assume all urls are allowed
+    return true;
+  }
+}
+
+/**
  * Return all the urls from a page that we may enqueue for further crawling
  * @return a list of absolute urls
  */
 const getLinksToFollow = async (page: Page, baseUrl: string, keywords?: string[]): Promise<string[]> => {
   // Find all the anchor tags and get the url from each
-  const urls = await page.$$eval('a', (elements => elements.map(e => e.getAttribute('href'))));
+  const urls = await page.$$eval('a', ((elements: any) => elements.map((e: any) => e.getAttribute('href'))));
 
   // Get the base url for any relative urls
   const currentPageUrlParts = (await page.evaluate(() => document.location.href)).split('/');
   const relativeUrlBase = currentPageUrlParts.slice(0, currentPageUrlParts.length).join('/');
 
   // Filter to only urls within our target website, and urls that match the provided keywords
-  return urls.filter((url: string | null) => url && isUrlWithinBaseWebsite(url, baseUrl)).map((url) => {
+  return urls.filter((url: string | null) => url && isUrlWithinBaseWebsite(url, baseUrl)).map((url: string) => {
     if (url!.startsWith(baseUrl)) {
       return url!;
     }
     const u = new URL(url!, relativeUrlBase);
     return `${u.origin}${u.pathname}`;
-  }).filter((url) => isUrlMatchingSomeKeyword(url, keywords));
+  }).filter(async (url: string) => {
+    return await isUrlAllowedInRobots(url) && isUrlMatchingSomeKeyword(url, keywords)
+  });
 };
 
 /**
@@ -99,7 +145,7 @@ const getLinksToFollow = async (page: Page, baseUrl: string, keywords?: string[]
 export const extractPageContentAndUrls = async (
   browser: Browser,
   input: CrawlPageInput,
-  destination?: CrawlDestination,
+  destination: CrawlDestination,
 ): Promise<string[]> => {
   const url = new URL(input.path, input.baseUrl).href;
   try {
@@ -114,10 +160,8 @@ export const extractPageContentAndUrls = async (
     const content = await extractContent(page);
     console.log("Extracted content from page:", content);
 
-    // Write the content to s3 if a destination was provided (ie the kendra stack was deployed too)
-    if (destination) {
-      await writePageToS3ForKendra(url, content, destination);
-    }
+    // Write the content to s3 if a destination was provided
+    await writePageToS3(url, content, destination);
 
     // Find fully qualified urls with the given base url
     const discoveredUrls = new Set(await getLinksToFollow(page, input.baseUrl, input.pathKeywords));

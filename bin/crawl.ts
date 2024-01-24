@@ -55,20 +55,14 @@ const lambda = new AWS.Lambda();
     
     if (response.Payload) {
       const { stateMachineExecutionArn } = JSON.parse(response.Payload as string);
-
+      console.log('stateMachineExecutionArn', stateMachineExecutionArn);
+      
       const region = stateMachineExecutionArn.split(':')[3];
       const stateMachineConsoleUrl = `https://${region}.console.aws.amazon.com/states/home?region=${region}#/executions/details/${stateMachineExecutionArn}`;
       console.log('---');
       console.log('Started web crawl execution. Track its progress in the console here:');
       console.log(stateMachineConsoleUrl);
 
-      const kendraIndexId = cfnExports.find((exp) => exp.Name === 'CrawlerKendraIndexId');
-      if (kendraIndexId) {
-        const kendraConsoleUrl = `https://${region}.console.aws.amazon.com/kendra/home?region=${region}#indexes/${kendraIndexId.Value}/search`;
-        console.log('---');
-        console.log('When the crawler has finished, you can search the Kendra index here:');
-        console.log(kendraConsoleUrl);
-      }
     } else {
       console.error("Failed to start the crawl", response);
     }
